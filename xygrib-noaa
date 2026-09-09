@@ -10,11 +10,11 @@ version="v9"
 # Base: V8 / V7 VALIDATED
 #
 # Download:
-#   f000 ... f072
+#   f000 ... f$MAX_FORECAST
 #   every 3 hours
 #
 # Total:
-#   25 files
+#   $MAX_FORECAST/3 files
 #
 # Result:
 #   a single GRIB2 with a NN-hour forecast
@@ -325,7 +325,7 @@ WORKTMP="/tmp/gfs-$DATE.XXXXXX"
 XYGRIB_DIR="${HOME}/.xygrib/grib"
 
 # Final file
-OUTPUT="${XYGRIB_DIR}/GFS_NOAA_${DATE}_${CYCLE}Z_72hs.grib2"
+OUTPUT="${XYGRIB_DIR}/GFS_NOAA_${DATE}_${CYCLE}Z_${MAX_FORECAST}hs.grib2"
 
 # Pause between requests
 PAUSE=4

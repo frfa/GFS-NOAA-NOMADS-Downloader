@@ -1,5 +1,10 @@
 # XyGrib GFS GRIB2 downloader from NOAA NOMADS
 
+[![Shell](https://img.shields.io/badge/POSIX_sh-any-green.svg)](https://de.wikipedia.org/wiki/POSIX)
+[![curl](https://img.shields.io/badge/curl-7.60.0-green.svg)](https://curl.se)
+
+---
+
 This is a fork of DrCalambre's fantastic GFS NOAA NOMADS downloader for XyGrib.
 I tried to make it more UNIXish by translating it to English, added various
 command line flags that you would expect from a command line tool, and added
