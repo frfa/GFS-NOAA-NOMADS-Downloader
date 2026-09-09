@@ -1,0 +1,564 @@
+#!/bin/sh
+program=`basename $0`
+#program="${0##*/}"
+progdir=`dirname $0`
+version="v9"
+# ============================================================
+# GFS NOAA NOMADS - $version
+# NN-hour forecast for XyGrib
+#
+# Base: V8 / V7 VALIDATED
+#
+# Download:
+#   f000 ... f072
+#   every 3 hours
+#
+# Total:
+#   25 files
+#
+# Result:
+#   a single GRIB2 with a NN-hour forecast
+#
+# The final file is saved directly to:
+#   ~/.xygrib/grib
+#
+# This allows XyGrib to find it automatically
+# and allows XyGrib's existing cleanup tasks
+# to manage older files.
+# ============================================================
+
+#set -u
+
+# vars
+d= v= q= n=
+
+# funcs
+[ -t 2 ] && black='\033[30m' red='\033[31m' green='\033[32m' yellow='\033[33m' blue='\033[34m' magenta='\033[35m' cyan='\033[36m' white='\033[37m' dflt='\033[39m'
+#msg() { [ "$q" ] || echo `date +"%Y-%m-%d %T"` $program "$@" >&2; }
+#msg() { [ "$q" ] || echo $program "$@" >&2; }
+msg() { echo "$@" >&2; } # generic messages are always issued
+dbg() { [ "$d" ] && msg ${white}D "$@"$dflt; } # debug messages on -d
+dbgx() { [ "$d" ] && { echo -n $white; "$@"; echo -n $dflt;} }
+ntc() { [ "$q" ] || msg ${green}N "$@"$dflt; } # notices always except on -q
+inf() { [ "$v" ] && msg ${cyan}I "$@"$dflt; } # informationals only on -v
+wrn() { [ "$q" ] || msg ${yellow}W "$@"$dflt; } # warnings always except on -q
+err() { msg ${red}E "$@"$dflt; } # errors are issued always
+syserr() { msg ${red}E "$@: `expl \\\$!=$?`"$dflt; } # system errors as well
+ftl() { local s=$?; msg ${red}F "$@ ($?)"$dflt; exit $s; } # fatals exit
+sysftl() { local s=$?; msg ${red}F "$@: `expl \\\$!=$?`"$dflt; exit $s; } # system fatals
+exe() { [ "$n" ] && msg "$@" || { dbg "$@"; "$@"; }; } # executions except -n
+# helpers
+expl() { perl -e "print $*"; }
+match() { re="$1"; shift; perl -e "'$*' =~ /$re/ && print \$1"; }
+filebase() { match '(.*?)(?:\.\w+)?$' "$*"; }
+plexit() { perl -e "exit ! ($*)"; }
+plawk() { perl -lane "$@"; }
+plawki() { perl -i -lane "$@"; }
+plsed() { perl -pale "$@"; }
+plsedi() { perl -i -pale "$@"; }
+# edit configuration: file keyword assignment
+confedit () { plsed "$1" "s/^\s*(?:\#\s*)$2.*/$2$3/ && exit 1" || echo "$2$3" >>"$1"; }
+uppercase() { expl "\"\U$*\""; }
+lowercase() { expl "\"\L$*\""; }
+isint() { expr "$1" : '^[+-]\?[0-9]\+$' >/dev/null; }
+isnum() { expr "$1" : '^[+-]\?[0-9]\+\.\?[0-9]*[eE]\?[+-]\?[0-9]*$' >/dev/null; }
+
+# ------------------------------------------------------------
+# CONFIGURATION
+# ------------------------------------------------------------
+
+DATE=$(date -u +%Y%m%d)
+
+# GFS Cycle - 00, 06, 12, 18
+CYCLE="00"
+
+# Horizon: 72 hours
+MAX_FORECAST=72
+
+# Time interval
+STEP=3
+
+# Select Region coordinates:
+# Adriatic
+WEST="11" EAST="18" NORTH="46" SOUTH="42"
+
+# Pre-defined regions format
+# Region-name	West-boundary East-boundary North-boundary South-boundary
+REGIONS="
+South-America   -80 -50 -15 -58
+Adriatic         11  18  46  42
+Mediterranean    -5  36  46  30
+UK-Ireland      -11   2  63  48
+North-Sea        -4  10  66  53
+Baltic            8  30  66  53
+Iceland         -25   8  68  53
+Carribean       -85 -58  30  10
+"
+
+# ------------------------------------------------------------
+# NOAA-GFS URL format
+# ------------------------------------------------------------
+# https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?dir=%2Fgfs.20260907%2F00%2Fatmos&file=gfs.t00z.pgrb2.0p25.anl&var_APCP=on&var_GUST=on&var_PRATE=on&var_PRES=on&var_TMP=on&var_UGRD=on&var_VGRD=on&lev_10_m_above_ground=on&lev_surface=on&subregion=&toplat=46&leftlon=11&rightlon=18&bottomlat=42
+
+# URL-encode a string
+urlenc() { echo -n "$*" | perl -pe "s/([^A-Za-z0-9^\-_.!~*'])/sprintf '%%%0x', ord \$1/eg"; }
+BASE_URL="https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?"
+# dir=%2Fgfs.${DATE}%2F${CYCLE}%2Fatmos" "/gfs.${DATE}/${CYCLE}/atmos"
+add_param() { local u="$1" v=`urlenc "$2"` w=`urlenc "$3"` s=
+              [ "$u" = "${u%%?}" ] || s="&"
+              echo -n "$u$s$v=$w"; }
+add_var() { add_param "$1" "var_$2" "${3:-on}"; }
+add_lev() { add_param "$1" "lev_$2" "${3:-on}"; }
+add_item() { plexit "'$2' =~ /^[A-Z\d-]+\$/" && add_var "$@" || add_lev "$@"; }
+
+# Available parameters:
+PARAMETERS="
+4LFTX  Best lifted index
+ABSV   Absolute vorticity
+ACPCP  Convective precipitation
+ALBDO  Albedo
+APCP   Total precipitation
+CAPE   Convective available potential energy
+CFRZR  Categorical freezing rain
+CICEP  Categorical ice pellets
+CIN    Convective inhibition
+CLWMR  Cloud mixing ratio
+CNWAT  Plant canopy surface water
+CPOFP  Percent frozen precipitation
+CPRAT  Convective precipitation rate
+CRAIN  Categorical rain
+CSNOW  Categorical snow
+CWAT   Cloud water
+CWORK  Cloud work function
+DLWRF  Downward long-wave radiation flux
+DPT    Dew point temperature
+DSWRF  Downward short-wave radiation flux
+DZDT   Vertical velocity
+FLDCP  Field capacity
+FRICV  Surface friction velocity
+GFLUX  Ground heat flux
+GRLE   Graupel
+GUST   Wind speed (gust)
+HCDC   High cloud cover
+HGT    Geopotential height
+HINDEX HINDEX
+HLCY   Storm relative helicity
+HPBL   Planetary boundary layer height
+ICAHT  ICAO standard atmosphere reference height
+ICEC   Ice cover
+ICEG   Ice growth rate
+ICETK  Ice thickness
+ICETMP Ice temperature
+ICMR   Ice water mixing ratio
+LAND   Land cover
+LCDC   Low cloud cover
+LFTX   Surface lifted index
+LHTFL  Latent heat net flux
+MCDC   Middle cloud cover
+MSLET  MSLP (Eta model reduction)
+O3MR   Ozone mixing ratio
+PEVPR  Potential evaporation rate
+PLPL   Pressure of level from which parcel was lifter
+POT    Potential temperature
+PRATE  Precipitation rate
+PRES   Pressure
+PRMSL  Pressure reduced to MSL
+PWAT   Precipitable water
+REFC   Composite reflectivity
+REFD   Reflectivity
+RH     Relative humidity
+RWMR   Rain mixing ratio
+SFCR   Surface roughness
+SHTFL  Sensible heat net flux
+SNMR   Snow mixing ratio
+SNOD   Snow depth
+SOILL  Liquid volumetric soil moisture (non-frozen)
+SOILW  Volumetric soil moisture content
+SOTYP  Soil type (as in Zobler)
+SPFH   Specific humidity
+SUNSD  Sunshine duration
+TCDC   Total cloud cover
+TMAX   Maximum temperature
+TMIN   Minimum temperature
+TMP    Temperature
+TOZNE  Total ozone
+TSOIL  Soil temperature
+UFLX   Momentum flux, u component
+UGRD   U-component of wind
+U-GWD  Zonal flux of gravity wave stress
+ULWRF  Upward long-wave radiation flux
+USTM   U-component of storm motion
+USWRF  Upward short-wave radiation flux
+VEG    Vegetation
+VFLX   Momentum flux, v component
+VGRD   V-component of wind
+V-GWD  Meridional flux of gravity wave stress
+VIS    Visibility
+VRATE  Ventilation rate
+VSTM   V-component of storm motion
+VVEL   Vertical velocity (pressure)
+VWSH   Vertical speed shear
+WATR   Water runoff
+WEASD  Water equivalent of accumulated snow depth
+WILT   Wilting point
+"
+PARAMS=`echo "$PARAMETERS"|cut -d" " -f1`
+
+# Available levels:
+LEVELS="
+0-0.1_m_below_ground
+0.1-0.4_m_below_ground
+0.4-1_m_below_ground
+1-2_m_below_ground
+0.995_sigma_level
+0.33-1_sigma_layer
+0.44-0.72_sigma_layer
+0.44-1_sigma_layer
+0.72-0.94_sigma_layer
+2_m_above_ground
+10_m_above_ground
+20_m_above_ground
+30_m_above_ground
+40_m_above_ground
+50_m_above_ground
+80_m_above_ground
+100_m_above_ground
+1000_m_above_ground
+4000_m_above_ground
+10_m_above_mean_sea_level
+1829_m_above_mean_sea_level
+2743_m_above_mean_sea_level
+3658_m_above_mean_sea_level
+3000-0_m_above_ground
+6000-0_m_above_ground
+180-0_mb_above_ground
+255-0_mb_above_ground
+90-0_mb_above_ground
+30-0_mb_above_ground
+0C_isotherm
+1_hybrid_level
+2_hybrid_level
+1000_mb
+975_mb
+950_mb
+925_mb
+900_mb
+850_mb
+800_mb
+750_mb
+700_mb
+650_mb
+600_mb
+550_mb
+500_mb
+450_mb
+400_mb
+350_mb
+300_mb
+250_mb
+200_mb
+150_mb
+100_mb
+70_mb
+50_mb
+40_mb
+30_mb
+20_mb
+15_mb
+10_mb
+7_mb
+5_mb
+3_mb
+2_mb
+1_mb
+0.7_mb
+0.4_mb
+0.2_mb
+0.1_mb
+0.07_mb
+0.04_mb
+0.02_mb
+0.01_mb
+surface_max_wind
+mean_sea_level
+boundary_layer_cloud_layer
+planetary_boundary_layer
+tropopause
+entire_atmosphere
+entire_atmosphere_(considered_as_a_single_layer)
+top_of_atmosphere
+convective_cloud_layer
+convective_cloud_bottom_level
+convective_cloud_top_level
+high_cloud_layer
+high_cloud_bottom_level
+high_cloud_top_level
+low_cloud_layer
+low_cloud_bottom_level
+low_cloud_top_level
+middle_cloud_layer
+middle_cloud_bottom_level
+middle_cloud_top_level
+cloud_ceiling
+highest_tropospheric_freezing_level
+PV=-2e-06_(Km^2/kg/s)_surface
+PV=2e-06_(Km^2/kg/s)_surface
+"
+
+DATASETS="
+None 
+Sailing APCP GUST PRATE PRES TMP UGRD VGRD surface 10_m_above_ground
+Extended TMP 2_m_above_ground DPT 2_m_above_ground RH 2_m_above_ground TCDC entire_atmosphere PRATE surface CSNOW surface UGRD 10_m_above_ground VGRD 10_m_above_ground GUST surface CAPE surface CFRZR surface SNOD surface WEASD surface HGT 925_mb 850_mb 700_mb 600_mb 500_mb 400_mb 300_mb 250_mb 200_mb TMP 925_mb 850_mb 700_mb 600_mb 500_mb 400_mb 300_mb 250_mb 200_mb HGT 0C_isotherm RH 0C_isotherm PRES 0C_isotherm
+"
+# Default dataset
+DATASET="Sailing"
+
+# ------------------------------------------------------------
+# DIRECTORIES
+# ------------------------------------------------------------
+
+# Temporary working files
+WORKDIR="/tmp/gfs-v9-${DATE}-${CYCLE}z"
+WORKTMP="/tmp/gfs-$DATE.XXXXXX"
+
+# Official GRIB directory of XyGrib
+XYGRIB_DIR="${HOME}/.xygrib/grib"
+
+# Final file
+OUTPUT="${XYGRIB_DIR}/GFS_NOAA_${DATE}_${CYCLE}Z_72hs.grib2"
+
+# Pause between requests
+PAUSE=4
+
+# Expected number of files
+EXPECTED_FILES=25
+
+
+######################################################################
+#
+# Command line parsing and help
+#
+######################################################################
+
+usage() {
+cat <<EOF
+Usage: $program [-options] {parameters-and-levels}
+
+Description:
+$program downloads individual weather forecasts from the NOAA-GFS website
+for a certain forecast period and stitches those individual files together to
+form a GRIB2-compliant result file that can be displayed in XyGrib.
+
+Options are:
+-v, --verbose	verbose mode
+-q, --quiet	quiet mode
+-d, --debug	debug mode
+-n, --noexec	do not actually execute anything, just simulate
+-h, --help	this help text
+-p, --pause N   pause N seconds between requests (default: $PAUSE seconds)
+-c, --cycle NN  use GFS run cycle NN (may be 00, 06, 12, or 18, default: $CYCLE)
+-f, --forecast  NN download NN-hour forecast (multiples of 3, default $MAX_FORECAST)
+-r, --region S  Download forecast for pre-defined region S
+-lr, --list-regions	List available regions
+-s, --dataset S Use GRIB parameters in dataset S when downloading from NOAA-GFS
+                (default: $DATASET)
+-ls, --list-datasets	List available datasets
+-lp, --list-parameters	List available parameters
+-ll, --list-levels	List available levelrs
+EOF
+   exit 1
+}
+
+# options & args
+while :; do
+    case "$1" in
+        -d|--debug) d=-d v=-v q=;;
+        -dd|--moredebug) d=-d v=-v q=; set -xv;;
+        -v|--verbose) v=-v q=;;
+        -q|--quiet) q=-q v=;;
+        -n|--noexec) n=-n;;
+	/\?|-h|--help) usage;;
+        # specific options go here
+        -p|--pause) PAUSE="$2"; shift;;
+        -c|--cycle) CYCLE="$2"; shift;;
+        -f|--forecast) MAX_FORECAST="$2"; shift;;
+        -r|--region) REGION="$2"; shift;;
+        -lr|--list-regions) list_regions="$1";;
+        -s|--dataset) DATASET="$2"; shift;;
+        -ls|--list-datasets) list_datasets="$1";;
+        -lp|--list-parameters) list_parameters="$1";;
+        -ll|--list-levels) list_levels="$1";;
+	-*) wrn "Unknown option $1 ignored";;
+	*) break;;
+    esac
+    shift
+done
+generic_opts="$d $v $q"
+#[ $# -lt 1 ] && ftl 'No arguments provided'
+
+# list regions
+[ "$list_regions" ] && echo "Defined regions   W   E   N   S$REGIONS" && exit 1
+
+# extract region coordinates
+[ "$REGION" ] && {
+    rl=`echo "$REGIONS"|egrep "^$REGION\b"`
+    [ "$rl" ] || ftl "Could not find region $REGION - use -rl to list regions"
+    WEST=`echo $rl|plawk 'print $F[1]'`
+    EAST=`echo $rl|plawk 'print $F[2]'`
+    NORTH=`echo $rl|plawk 'print $F[3]'`
+    SOUTH=`echo $rl|plawk 'print $F[4]'`
+    ntc "Using region $REGION: $WEST, $EAST, $NORTH, $SOUTH"
+}
+
+# list datasets
+[ "$list_datasets" ] && echo "Defined datasets:$DATASETS" && exit 1
+
+# list parameters
+[ "$list_parameters" ] && echo "Defined parameters:$PARAMETERS" && exit 1
+
+# list levels
+[ "$list_levels" ] && echo "Defined levels:$LEVELS" && exit 1
+
+# ------------------------------------------------------------
+# CHECKS & PREPARATION
+# ------------------------------------------------------------
+
+# check forecast range
+[ "$MAX_FORECAST" -lt 0 -o 384 -lt "$MAX_FORECAST" ] &&\
+    ftl "Forecast $MAX_FORECAST out of allowed range 00 - 384"
+
+# construct ITEMS from dataset and command line parameters
+ITEMS=`echo "$DATASETS" | grep "^$DATASET" | cut -d" " -f2-`" $*"
+
+# create temp working dir
+mkdir -p "${XYGRIB_DIR}"
+#mkdir -p "${WORKDIR}"
+WORKDIR=`mktemp -d "$WORKTMP"`
+trap "rm -rf $WORKDIR" 1 2 3 9 15
+
+cat <<EOF
+============================================================
+ GFS NOAA NOMADS - V9
+ $MAX_FORECAST-hour forecast for XyGrib
+============================================================
+
+Date        : ${DATE}
+Cycle       : ${CYCLE}Z
+Horizon     : f000 → f${MAX_FORECAST}
+Interval    : ${STEP} hours
+Timesteps   : ${EXPECTED_FILES}
+
+Region:
+  West      : ${WEST}
+  East      : ${EAST}
+  North     : ${NORTH}
+  South     : ${SOUTH}
+
+Items:
+  $ITEMS
+
+XyGrib directory:
+  ${XYGRIB_DIR}
+
+Output:
+  ${OUTPUT}
+
+Temporary directory:
+  ${WORKDIR}
+
+============================================================
+EOF
+
+###
+# Build static part of URL (without file= parameter
+###
+
+STATIC_URL="$BASE_URL"
+STATIC_URL=`add_param "$STATIC_URL" dir "/gfs.${DATE}/${CYCLE}/atmos"`
+for i in $ITEMS; do
+    STATIC_URL=`add_item "$STATIC_URL" "$i" on`
+done
+# subregion=&leftlon=${WEST}&rightlon=${EAST}&toplat=${NORTH}&bottomlat=${SOUTH}"
+STATIC_URL=`add_param "$STATIC_URL" subregion ""`
+STATIC_URL=`add_param "$STATIC_URL" leftlon "$WEST"`
+STATIC_URL=`add_param "$STATIC_URL" rightlon "$EAST"`
+STATIC_URL=`add_param "$STATIC_URL" toplat "$NORTH"`
+STATIC_URL=`add_param "$STATIC_URL" bottomlat "$SOUTH"`
+dbg "STATIC_URL now: $STATIC_URL"
+
+# ------------------------------------------------------------
+# DOWNLOAD OF EACH TIMESTEP
+# ------------------------------------------------------------
+
+HOUR=0
+while [ "$HOUR" -le "$MAX_FORECAST" ]; do
+    FORECAST=$(printf "%03d" "${HOUR}")
+    FILE="gfs.t${CYCLE}z.pgrb2.0p25.f${FORECAST}"
+    PART="${WORKDIR}/gfs_${FORECAST}.grib2"
+    inf "Forecast: F${FORECAST} file: ${FILE}"
+
+    DNL_URL=`add_param "$STATIC_URL" file "$FILE"`
+    dbg "DNL_URL now: $DNL_URL"
+    exe curl -f -s -S --location --connect-timeout 30 --max-time 600 \
+        --retry 2 --retry-delay 5 --output "${PART}" \
+        "$DNL_URL" || ftl "Could not download F$FORECAST"
+
+    [ ! -s "${PART}" ] && ftl "ERROR: F${FORECAST} produced an empty file."
+
+    SIZE=$(du -h "${PART}" | cut -f1)
+    ntc "OK → F${FORECAST} (${SIZE})"
+
+    # Do not wait after the last file
+    if [ ${HOUR} -lt ${MAX_FORECAST} -a -n "$PAUSE" ]; then
+        inf "Waiting ${PAUSE} seconds..."
+        exe sleep "${PAUSE}"
+    fi
+
+    HOUR=`expr "$HOUR" + "$STEP"`
+done
+
+# ------------------------------------------------------------
+# VERIFY FILE COUNT
+# ------------------------------------------------------------
+
+COUNT=$(find "${WORKDIR}" -maxdepth 1 -name 'gfs_*.grib2' | wc -l)
+
+ntc "Download complete"
+inf "Files obtained : ${COUNT}; expected: ${EXPECTED_FILES}"
+
+[ "${COUNT}" -ne "${EXPECTED_FILES}" ] &&\
+    ftl "ERROR: Did not obtain the ${EXPECTED_FILES} expected timesteps."
+
+# ------------------------------------------------------------
+# BUILD FINAL GRIB2
+# ------------------------------------------------------------
+
+ntc "Building $MAX_FORECAST-hour GRIB2..."
+
+rm -f "${OUTPUT}"
+#HOUR=0
+#while [ "$HOUR" -le "$MAX_FORECAST" ]; do
+#    FORECAST=$(printf "%03d" "${HOUR}")
+#    PART="${WORKDIR}/gfs_${FORECAST}.grib2"
+#    cat "${PART}" >> "${OUTPUT}"
+#    HOUR=`expr "$HOUR" + "$STEP"`
+#done
+cat "${WORKDIR}"/gfs_*.grib2 >"$OUTPUT"
+
+# ------------------------------------------------------------
+# FINAL VERIFICATION
+# ------------------------------------------------------------
+
+[ ! -s "${OUTPUT}" ] && ftl "ERROR: Could not create the final GRIB2."
+
+inf "Finished; final file: ${OUTPUT}"
+ls -lh "${OUTPUT}"
+
+inf "Total size of parts:"
+du -ch "${WORKDIR}"/*.grib2 | tail -1
+
+cat <<EOF
+The final file is already inside the official
+GRIB directory of XyGrib: ${XYGRIB_DIR}
+Final file: ${OUTPUT}
+EOF
