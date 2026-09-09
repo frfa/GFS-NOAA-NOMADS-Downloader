@@ -5,6 +5,16 @@ I tried to make it more UNIXish by translating it to English, added various
 command line flags that you would expect from a command line tool, and added
 predefined regions and data sets. See `xygrib-noaa --help` ;)
 
+Change and add regions and datasets to your liking in the script. The parameters
+and levels though were modeled after the original NOMADS GRIG file downloader at
+<https://nomads.ncep.noaa.gov/gribfilter.php?ds=gfs_0p25>.
+
+Also a trap has been introduced to remove the temp working directory if the
+script is interrupted or an error occurs during script execution.
+
+And BTW - it works without Bash now, a standard POSIX-compatible shell should
+suffice (like the standard `/bin/sh` which is `/bin/dash` on Ubuntu or the like).
+
 # GFS NOAA NOMADS Downloader for XyGrib — GRIB2 Forecast
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
