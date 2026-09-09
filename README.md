@@ -1,3 +1,10 @@
+# XyGrib GFS GRIB2 downloader from NOAA NOMADS
+
+This is a fork of DrCalambre's fantastic GFS NOAA NOMADS downloader for XyGrib.
+I tried to make it more UNIXish by translating it to English, added various
+command line flags that you would expect from a command line tool, and added
+predefined regions and data sets. See `xygrib-noaa --help` ;)
+
 # GFS NOAA NOMADS Downloader for XyGrib — GRIB2 Forecast
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
