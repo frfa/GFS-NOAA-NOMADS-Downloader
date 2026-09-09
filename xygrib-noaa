@@ -427,6 +427,13 @@ generic_opts="$d $v $q"
 [ "$MAX_FORECAST" -lt 0 -o 384 -lt "$MAX_FORECAST" ] &&\
     ftl "Forecast $MAX_FORECAST out of allowed range 00 - 384"
 
+# check items on command line
+for item in $*; do
+    echo "$PARAMETERS" | egrep -q "^$item\b" ||\
+        echo "$LEVELS" | egrep -q "^$item\b" ||\
+            err "Parameter or level $item not found - use -lp/-ll"
+done
+
 # construct ITEMS from dataset and command line parameters
 ITEMS=`echo "$DATASETS" | grep "^$DATASET" | cut -d" " -f2-`" $*"
 
@@ -438,7 +445,7 @@ trap "rm -rf $WORKDIR" 1 2 3 9 15
 
 cat <<EOF
 ============================================================
- GFS NOAA NOMADS - V9
+ GFS NOAA NOMADS - $version
  $MAX_FORECAST-hour forecast for XyGrib
 ============================================================
 
@@ -448,7 +455,7 @@ Horizon     : f000 → f${MAX_FORECAST}
 Interval    : ${STEP} hours
 Timesteps   : ${EXPECTED_FILES}
 
-Region:
+Region $REGION:
   West      : ${WEST}
   East      : ${EAST}
   North     : ${NORTH}
@@ -503,7 +510,8 @@ while [ "$HOUR" -le "$MAX_FORECAST" ]; do
         --retry 2 --retry-delay 5 --output "${PART}" \
         "$DNL_URL" || ftl "Could not download F$FORECAST"
 
-    [ ! -s "${PART}" ] && ftl "ERROR: F${FORECAST} produced an empty file."
+    [ ! -s "${PART}" -a -z "$n" ] &&\
+        ftl "ERROR: F${FORECAST} produced an empty file."
 
     SIZE=$(du -h "${PART}" | cut -f1)
     ntc "OK → F${FORECAST} (${SIZE})"
@@ -526,7 +534,7 @@ COUNT=$(find "${WORKDIR}" -maxdepth 1 -name 'gfs_*.grib2' | wc -l)
 ntc "Download complete"
 inf "Files obtained : ${COUNT}; expected: ${EXPECTED_FILES}"
 
-[ "${COUNT}" -ne "${EXPECTED_FILES}" ] &&\
+[ "${COUNT}" -ne "${EXPECTED_FILES}" -a -z "$n" ] &&\
     ftl "ERROR: Did not obtain the ${EXPECTED_FILES} expected timesteps."
 
 # ------------------------------------------------------------
@@ -543,19 +551,19 @@ rm -f "${OUTPUT}"
 #    cat "${PART}" >> "${OUTPUT}"
 #    HOUR=`expr "$HOUR" + "$STEP"`
 #done
-cat "${WORKDIR}"/gfs_*.grib2 >"$OUTPUT"
+exe cat "${WORKDIR}"/gfs_*.grib2 >"$OUTPUT"
 
 # ------------------------------------------------------------
 # FINAL VERIFICATION
 # ------------------------------------------------------------
 
-[ ! -s "${OUTPUT}" ] && ftl "ERROR: Could not create the final GRIB2."
+[ ! -s "${OUTPUT}" -a -z "$n" ] && ftl "ERROR: Could not create the final GRIB2."
 
 inf "Finished; final file: ${OUTPUT}"
 ls -lh "${OUTPUT}"
 
 inf "Total size of parts:"
-du -ch "${WORKDIR}"/*.grib2 | tail -1
+exe du -ch "${WORKDIR}"/*.grib2 | tail -1
 
 cat <<EOF
 The final file is already inside the official

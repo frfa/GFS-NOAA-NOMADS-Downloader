@@ -8,7 +8,7 @@
 This is a fork of DrCalambre's fantastic GFS NOAA NOMADS downloader for XyGrib.
 I tried to make it more UNIXish by translating it to English, added various
 command line flags that you would expect from a command line tool, and added
-predefined regions and data sets. See `xygrib-noaa --help` ;)
+predefined regions and data sets. See `xygrib-noaa --help` 😉
 
 Change and add regions and datasets to your liking in the script. The parameters
 and levels though were modeled after the original NOMADS GRIG file downloader at
