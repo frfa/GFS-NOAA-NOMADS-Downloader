@@ -11,7 +11,7 @@ command line flags that you would expect from a command line tool, and added
 predefined regions and data sets. See `xygrib-noaa --help` 😉
 
 Change and add regions and datasets to your liking in the script. The parameters
-and levels though were modeled after the original NOMADS GRIG file downloader at
+and levels though were modeled after the original NOMADS GRIB file downloader at
 <https://nomads.ncep.noaa.gov/gribfilter.php?ds=gfs_0p25>.
 
 Also a trap has been introduced to remove the temp working directory if the

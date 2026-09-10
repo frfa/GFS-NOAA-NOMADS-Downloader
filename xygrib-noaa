@@ -2,15 +2,26 @@
 program=`basename $0`
 #program="${0##*/}"
 progdir=`dirname $0`
-version="v9"
+git_author='$Author: frfa$'
+git_email='$Email: frfa@msg-oob.net$'
+git_date='$Date: 2026-09-10 13:57:17+0000$'
+git_license='$License: GNU General Public License v3.0$'
+git_licensefile='$LicenseFile: LICENSE$'
+git_version='$Version: 1.0.1$'
+git_revision='$Revision: f730a9d152494c5d32b934077403041ab2ecbd9f$'
+git_rev='$Rev: f730a9d$'
+git_commitcount='$CommitCount: 31$'
+git_lastcommitmessage='$LastCommitMessage: Added check for command line parameters and levels, fixed -n/--no-exec flag.$'
 # ============================================================
-# GFS NOAA NOMADS - $version
-# NN-hour forecast for XyGrib
+# GFS NOAA NOMADS GRIB2 downloader - $Version: 1.0.1$ $Rev: f730a9d$, #$CommitCount: 31$
+# NN-hour GRIB2 forecast for XyGrib
 #
-# Base: V8 / V7 VALIDATED
+# $Date: 2026-09-10 13:57:17+0000$
+# $Revision: f730a9d152494c5d32b934077403041ab2ecbd9f$
+# $LastCommitMessage: Added check for command line parameters and levels, fixed -n/--no-exec flag.$
 #
 # Download:
-#   f000 ... f$MAX_FORECAST
+#   f000 ... fNNN
 #   every 3 hours
 #
 # Total:
@@ -34,22 +45,22 @@ d= v= q= n=
 
 # funcs
 [ -t 2 ] && black='\033[30m' red='\033[31m' green='\033[32m' yellow='\033[33m' blue='\033[34m' magenta='\033[35m' cyan='\033[36m' white='\033[37m' dflt='\033[39m'
-#msg() { [ "$q" ] || echo `date +"%Y-%m-%d %T"` $program "$@" >&2; }
-#msg() { [ "$q" ] || echo $program "$@" >&2; }
-msg() { echo "$@" >&2; } # generic messages are always issued
-dbg() { [ "$d" ] && msg ${white}D "$@"$dflt; } # debug messages on -d
-dbgx() { [ "$d" ] && { echo -n $white; "$@"; echo -n $dflt;} }
-ntc() { [ "$q" ] || msg ${green}N "$@"$dflt; } # notices always except on -q
-inf() { [ "$v" ] && msg ${cyan}I "$@"$dflt; } # informationals only on -v
-wrn() { [ "$q" ] || msg ${yellow}W "$@"$dflt; } # warnings always except on -q
-err() { msg ${red}E "$@"$dflt; } # errors are issued always
-syserr() { msg ${red}E "$@: `expl \\\$!=$?`"$dflt; } # system errors as well
-ftl() { local s=$?; msg ${red}F "$@ ($?)"$dflt; exit $s; } # fatals exit
-sysftl() { local s=$?; msg ${red}F "$@: `expl \\\$!=$?`"$dflt; exit $s; } # system fatals
-exe() { [ "$n" ] && msg "$@" || { dbg "$@"; "$@"; }; } # executions except -n
+#msg() { [ "$q" ] || echo `date +"%Y-%m-%d %T"` "$program "$*" >&2; }
+#msg() { [ "$q" ] || echo "$program $*" >&2; }
+msg() { echo "$*" >&2; } # generic messages are always issued
+dbg() { [ "$d" ] && msg "${white}🐛 $*$dflt"; } # debug messages on -d
+dbgx() { [ "$d" ] && { echo -n "$white"; "$@"; echo -n "$dflt";} }
+ntc() { [ "$q" ] || msg "${green}✅ $*$dflt"; } # notices always except on -q
+inf() { [ "$v" ] && msg "${cyan}ℹ️  $*$dflt"; } # informationals only on -v
+wrn() { [ "$q" ] || msg "${yellow}⚠️  $*$dflt"; } # warnings always except on -q
+err() { msg "${red}❌ $*$dflt"; } # errors are issued always
+syserr() { msg "${red}❌ $*: `expl \\\$!=$?`$dflt"; } # system errors as well
+ftl() { msg "${red}🧨 $* ($?)$dflt"; exit 1; } # fatals exit
+sysftl() { local x=$?; msg "${red}🧨 $*: `expl \\\$!=$x` ($x)$dflt"; exit $x; } # system fatals
+exe() { [ "$n" ] && msg "⚙️  $*" || { dbg "$*"; "$@"; }; } # executions except -n
 # helpers
 expl() { perl -e "print $*"; }
-match() { re="$1"; shift; perl -e "'$*' =~ /$re/ && print \$1"; }
+match() { perl -e '$ARGV[1] =~ /$ARGV[0]/ && print $1' "$@"; }
 filebase() { match '(.*?)(?:\.\w+)?$' "$*"; }
 plexit() { perl -e "exit ! ($*)"; }
 plawk() { perl -lane "$@"; }
@@ -66,6 +77,20 @@ isnum() { expr "$1" : '^[+-]\?[0-9]\+\.\?[0-9]*[eE]\?[+-]\?[0-9]*$' >/dev/null; 
 # ------------------------------------------------------------
 # CONFIGURATION
 # ------------------------------------------------------------
+
+# derived GIT variables
+author=`match '\\$\w+:?\s*(.*?)\\$' "$git_author"`
+email=`match '\\$\w+:?\s*(.*?)\\$' "$git_email"`
+date=`match '\\$\w+:?\s*(.*?)\\$' "$git_date"`
+year=`match '(....)' "$date"`
+license=`match '\\$\w+:?\s*(.*?)\\$' "$git_license"`
+licensefile=`match '\\$\w+:?\s*(.*?)\\$' "$git_licensefile"`
+version=`match '\\$\w+:?\s*(.*?)\\$' "$git_version"`
+revision=`match '\\$\w+:?\s*(.*?)\\$' "$git_revision"`
+rev=`match '\\$\w+:?\s*(.*?)\\$' "$git_rev"`
+commitcount=`match '\\$\w+:?\s*(.*?)\\$' "$git_commitcount"`
+versionstring="$version-$commitcount-$rev"
+lastcommitmessage=`match '\\$\w+:?\s*(.*?)\\$' "$git_lastcommitmessage"`
 
 DATE=$(date -u +%Y%m%d)
 
@@ -95,13 +120,16 @@ Iceland         -25   8  68  53
 Carribean       -85 -58  30  10
 "
 
+# Default region
+REGION="Adriatic"
+
 # ------------------------------------------------------------
 # NOAA-GFS URL format
 # ------------------------------------------------------------
 # https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?dir=%2Fgfs.20260907%2F00%2Fatmos&file=gfs.t00z.pgrb2.0p25.anl&var_APCP=on&var_GUST=on&var_PRATE=on&var_PRES=on&var_TMP=on&var_UGRD=on&var_VGRD=on&lev_10_m_above_ground=on&lev_surface=on&subregion=&toplat=46&leftlon=11&rightlon=18&bottomlat=42
 
 # URL-encode a string
-urlenc() { echo -n "$*" | perl -pe "s/([^A-Za-z0-9^\-_.!~*'])/sprintf '%%%0x', ord \$1/eg"; }
+urlenc() { echo -n "$*" | perl -pe "s/([^A-Za-z0-9^\-_.!~*'])/sprintf '%%%0X', ord \$1/eg"; }
 BASE_URL="https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl?"
 # dir=%2Fgfs.${DATE}%2F${CYCLE}%2Fatmos" "/gfs.${DATE}/${CYCLE}/atmos"
 add_param() { local u="$1" v=`urlenc "$2"` w=`urlenc "$3"` s=
@@ -341,7 +369,9 @@ EXPECTED_FILES=25
 ######################################################################
 
 usage() {
-cat <<EOF
+    cat <<EOF
+$program v$versionstring ©$author $year <$email>
+License: $license
 Usage: $program [-options] {parameters-and-levels}
 
 Description:
@@ -350,12 +380,14 @@ for a certain forecast period and stitches those individual files together to
 form a GRIB2-compliant result file that can be displayed in XyGrib.
 
 Options are:
--v, --verbose	verbose mode
--q, --quiet	quiet mode
--d, --debug	debug mode
--n, --noexec	do not actually execute anything, just simulate
+-v, --verbose	Verbose mode
+-q, --quiet	Quiet mode
+-d, --debug	Debug mode
+-n, --noexec	Do not actually execute anything, just simulate
 -h, --help	this help text
--p, --pause N   pause N seconds between requests (default: $PAUSE seconds)
+-V, --version   Display version information
+-L, --license   Display license information
+-p, --pause N   Pause N seconds between requests (default: $PAUSE seconds)
 -c, --cycle NN  use GFS run cycle NN (may be 00, 06, 12, or 18, default: $CYCLE)
 -f, --forecast  NN download NN-hour forecast (multiples of 3, default $MAX_FORECAST)
 -r, --region S  Download forecast for pre-defined region S
@@ -378,6 +410,15 @@ while :; do
         -q|--quiet) q=-q v=;;
         -n|--noexec) n=-n;;
 	/\?|-h|--help) usage;;
+        -V|--version) cat <<EOF
+This is $program $versionstring ©$author $year <$email>
+$program is licensed under the $license
+See "$program --license" for details
+Git revision: $revision
+Last commit #$commitcount: $lastcommitmessage
+EOF
+            exit 1;;
+        -L|--license) [ -r LICENSE ] && less LICENSE || ftl "No license found";;
         # specific options go here
         -p|--pause) PAUSE="$2"; shift;;
         -c|--cycle) CYCLE="$2"; shift;;
@@ -393,8 +434,12 @@ while :; do
     esac
     shift
 done
-generic_opts="$d $v $q"
+generic_opts="$d: $v $q"
 #[ $# -lt 1 ] && ftl 'No arguments provided'
+
+# ------------------------------------------------------------
+# CHECKS & PREPARATION
+# ------------------------------------------------------------
 
 # list regions
 [ "$list_regions" ] && echo "Defined regions   W   E   N   S$REGIONS" && exit 1
@@ -407,21 +452,22 @@ generic_opts="$d $v $q"
     EAST=`echo $rl|plawk 'print $F[2]'`
     NORTH=`echo $rl|plawk 'print $F[3]'`
     SOUTH=`echo $rl|plawk 'print $F[4]'`
-    ntc "Using region $REGION: $WEST, $EAST, $NORTH, $SOUTH"
+    ntc "Using region $REGION: $WEST, $EAST: $NORTH, $SOUTH"
 }
 
 # list datasets
-[ "$list_datasets" ] && echo "Defined datasets:$DATASETS" && exit 1
+[ "$list_datasets" ] && echo "Defined datasets: $DATASETS" && exit 1
+
+# check dataset exists
+DSITEMS=`echo "$DATASETS" | egrep "^$DATASET\b" | cut -d" " -f2-`
+[ "$DSITEMS" ] && ntc "Using dataset $DATASET" ||\
+    ftl "Dataset $DATASET does not exist - use -ls to list available datasets"
 
 # list parameters
-[ "$list_parameters" ] && echo "Defined parameters:$PARAMETERS" && exit 1
+[ "$list_parameters" ] && echo "Defined parameters: $PARAMETERS" && exit 1
 
 # list levels
-[ "$list_levels" ] && echo "Defined levels:$LEVELS" && exit 1
-
-# ------------------------------------------------------------
-# CHECKS & PREPARATION
-# ------------------------------------------------------------
+[ "$list_levels" ] && echo "Defined levels: $LEVELS" && exit 1
 
 # check forecast range
 [ "$MAX_FORECAST" -lt 0 -o 384 -lt "$MAX_FORECAST" ] &&\
@@ -431,49 +477,36 @@ generic_opts="$d $v $q"
 for item in $*; do
     echo "$PARAMETERS" | egrep -q "^$item\b" ||\
         echo "$LEVELS" | egrep -q "^$item\b" ||\
-            err "Parameter or level $item not found - use -lp/-ll"
+            err "Parameter or level $item not found - use -lp/-ll to list available parameters"
 done
 
 # construct ITEMS from dataset and command line parameters
-ITEMS=`echo "$DATASETS" | grep "^$DATASET" | cut -d" " -f2-`" $*"
+ITEMS="$DSITEMS $*"
 
 # create temp working dir
 mkdir -p "${XYGRIB_DIR}"
 #mkdir -p "${WORKDIR}"
 WORKDIR=`mktemp -d "$WORKTMP"`
-trap "rm -rf $WORKDIR" 1 2 3 9 15
+cleanup() { wrn "Cleaning up..."; rm -rf "$WORKDIR"; }
+trap "cleanup" 0 1 2 3 9 15
 
-cat <<EOF
-============================================================
- GFS NOAA NOMADS - $version
- $MAX_FORECAST-hour forecast for XyGrib
-============================================================
+[ "$v" ] && cat <<EOF
+ℹ️  GFS NOAA NOMADS - $versionstring
+$MAX_FORECAST-hour forecast for XyGrib
 
-Date        : ${DATE}
-Cycle       : ${CYCLE}Z
-Horizon     : f000 → f${MAX_FORECAST}
-Interval    : ${STEP} hours
-Timesteps   : ${EXPECTED_FILES}
+Region $REGION: ${WEST}, E ${EAST}, N ${NORTH}, S ${SOUTH}
 
-Region $REGION:
-  West      : ${WEST}
-  East      : ${EAST}
-  North     : ${NORTH}
-  South     : ${SOUTH}
+Dataset $DATASET: $ITEMS
 
-Items:
-  $ITEMS
+Date                : ${DATE}
+Cycle               : ${CYCLE}Z
+Horizon             : f000 → f${MAX_FORECAST}
+Interval            : ${STEP} hours
+Timesteps           : ${EXPECTED_FILES}
 
-XyGrib directory:
-  ${XYGRIB_DIR}
-
-Output:
-  ${OUTPUT}
-
-Temporary directory:
-  ${WORKDIR}
-
-============================================================
+Result file         : ${OUTPUT}
+XyGrib directory    : ${XYGRIB_DIR}
+Temporary directory : ${WORKDIR}
 EOF
 
 ###
@@ -513,7 +546,7 @@ while [ "$HOUR" -le "$MAX_FORECAST" ]; do
     [ ! -s "${PART}" -a -z "$n" ] &&\
         ftl "ERROR: F${FORECAST} produced an empty file."
 
-    SIZE=$(du -h "${PART}" | cut -f1)
+    SIZE=$(exe du -h "${PART}" | cut -f1)
     ntc "OK → F${FORECAST} (${SIZE})"
 
     # Do not wait after the last file
@@ -522,7 +555,7 @@ while [ "$HOUR" -le "$MAX_FORECAST" ]; do
         exe sleep "${PAUSE}"
     fi
 
-    HOUR=`expr "$HOUR" + "$STEP"`
+    HOUR=$((HOUR + STEP))
 done
 
 # ------------------------------------------------------------
@@ -545,11 +578,11 @@ ntc "Building $MAX_FORECAST-hour GRIB2..."
 
 rm -f "${OUTPUT}"
 #HOUR=0
-#while [ "$HOUR" -le "$MAX_FORECAST" ]; do
+#while [ "$HOUR: $MAX_FORECAST" ]; do
 #    FORECAST=$(printf "%03d" "${HOUR}")
 #    PART="${WORKDIR}/gfs_${FORECAST}.grib2"
 #    cat "${PART}" >> "${OUTPUT}"
-#    HOUR=`expr "$HOUR" + "$STEP"`
+#    HOUR=`expr "$HOUR: $STEP"`
 #done
 exe cat "${WORKDIR}"/gfs_*.grib2 >"$OUTPUT"
 
@@ -561,12 +594,9 @@ exe cat "${WORKDIR}"/gfs_*.grib2 >"$OUTPUT"
 
 inf "Finished; final file: ${OUTPUT}"
 ls -lh "${OUTPUT}"
+[ "$n" ] && rm -f "$OUTPUT"
 
 inf "Total size of parts:"
 exe du -ch "${WORKDIR}"/*.grib2 | tail -1
 
-cat <<EOF
-The final file is already inside the official
-GRIB directory of XyGrib: ${XYGRIB_DIR}
-Final file: ${OUTPUT}
-EOF
+ntc "Result file: ${OUTPUT}"
